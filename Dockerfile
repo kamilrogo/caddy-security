@@ -3,7 +3,7 @@ FROM caddy:builder-alpine AS builder
 
 # Install build dependencies and xcaddy
 RUN apk add --no-cache git curl bash && \
-    curl -fsSL https://github.com/caddyserver/xcaddy/releases/latest/download/xcaddy_$(go env GOOS)_$(go env GOARCH) -o /usr/bin/xcaddy && \
+    curl -fsSL https://github.com/caddyserver/xcaddy/releases/latest/download/xcaddy_linux_amd64 -o /usr/bin/xcaddy && \
     chmod +x /usr/bin/xcaddy
 
 # Build custom Caddy with plugins
