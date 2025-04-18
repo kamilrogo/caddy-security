@@ -1,8 +1,10 @@
 # Stage 1: Build Caddy with plugins using xcaddy
 FROM caddy:builder-alpine AS builder
 
-# Install build dependencies
-RUN apk add --no-cache git bash
+# Install build dependencies and xcaddy
+RUN apk add --no-cache git curl bash && \
+    curl -fsSL https://github.com/caddyserver/xcaddy/releases/latest/download/xcaddy_$(go env GOOS)_$(go env GOARCH) -o /usr/bin/xcaddy && \
+    chmod +x /usr/bin/xcaddy
 
 # Build custom Caddy with plugins
 RUN xcaddy build \
@@ -14,3 +16,4 @@ FROM caddy:alpine
 
 # Copy built Caddy binary
 COPY --from=builder /usr/bin/caddy /usr/bin/caddy
+
