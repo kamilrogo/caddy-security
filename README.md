@@ -1,36 +1,28 @@
-
 # Caddy + Caddy-Security (Alpine Auto-Build)
 
-This repo automatically builds a **Caddy (Alpine)** image with the **caddy-security** plugin included.
-All builds run on **GitHub Actions** — no local compiling needed.
+![Build Status](https://github.com/kamilrogo/caddy-security/actions/workflows/docker-ghcr.yml/badge.svg)
 
-### Features
-
-* Lightweight **Alpine** base
-* Includes **caddy-security** plugin
-* Auto-builds **only when Caddy releases a new version**
-* Tags:
-
-  * `latest` — newest build
-  * `<caddy-version>-alpine` — pinned version for rollback
+This repository automatically builds a **Caddy (Alpine)** Docker image with the **caddy-security** plugin.
+GitHub Actions checks daily for new versions of **Caddy** or **caddy-security** and rebuilds the image when needed.
 
 ---
 
-## Pull the image
+## 📦 Image
 
 ```
 ghcr.io/kamilrogo/caddy-security:latest
+ghcr.io/kamilrogo/caddy-security:<caddy>-alpine-sec-<plugin>
 ```
 
-or a versioned tag:
+Example:
 
 ```
-ghcr.io/kamilrogo/caddy-security:2.10.2-alpine
+ghcr.io/kamilrogo/caddy-security:2.10.3-alpine-sec-1.1.22
 ```
 
 ---
 
-## Run it
+## 🚀 Run
 
 ```bash
 docker run --rm \
@@ -41,18 +33,16 @@ docker run --rm \
 
 ---
 
-## How it works
+## ⚙️ How It Works
 
-* GitHub Actions checks `caddy:alpine` daily
-* If Caddy has a new version → a new image is built and pushed
-* If not → the workflow exits instantly
-* Your server only needs to **pull** the image
+* Fetches current **Caddy version** from `caddy:alpine`
+* Fetches latest **caddy-security version** using Go module metadata
+* Compares against existing GHCR tags
+* Builds only when a new version is found
+* Publishes:
+
+  * `latest`
+  * `<caddy>-alpine-sec-<plugin>`
 
 ---
 
-## Files
-
-```
-Dockerfile
-.github/workflows/build.yml
-```
