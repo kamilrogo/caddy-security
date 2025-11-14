@@ -1,46 +1,79 @@
-name: Build and Push Caddy Security Image to GHCR
+name: Build Caddy + caddy-security (alpine)
 
 on:
-  push:
-    branches: [ "main" ]
-  release:
-    types: [ "published" ]
+  schedule:
+    - cron: "0 3 * * *"   # daily at 03:00 UTC (just checks; may skip)
+  workflow_dispatch:       # manual "Run workflow" button
+
+permissions:
+  contents: read
+  packages: write   # needed to push to GHCR
 
 jobs:
-  build-and-push:
+  build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
+      - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract version info
-        id: version
+      - name: Detect latest Caddy version (alpine)
+        id: detect
         run: |
-          if [[ "${GITHUB_EVENT_NAME}" == "release" ]]; then
-            VERSION="${GITHUB_REF##*/}"
+          LATEST=$(docker run --rm caddy:alpine caddy version | head -n1 | awk '{print $1}')
+          LATEST=${LATEST#v}
+          echo "latest_caddy=$LATEST" >> $GITHUB_OUTPUT
+          echo "Detected Caddy version: $LATEST"
+
+      - name: Check existing image version
+        id: check
+        run: |
+          IMAGE_BASE=ghcr.io/${{ github.repository_owner }}/caddy-security
+          VERSION=${{ steps.detect.outputs.latest_caddy }}
+
+          echo "Checking if ${IMAGE_BASE}:${VERSION}-alpine already exists..."
+
+          # Try to pull; ignore errors
+          docker pull ${IMAGE_BASE}:${VERSION}-alpine 2>/dev/null || true
+
+          # If we now have it locally, it exists in registry
+          EXISTS=$(docker images -q ${IMAGE_BASE}:${VERSION}-alpine || true)
+
+          if [ -n "$EXISTS" ]; then
+            echo "already_built=true" >> $GITHUB_OUTPUT
+            echo "Image for Caddy ${VERSION}-alpine already exists. Skipping build."
           else
-            VERSION="sha-$(echo $GITHUB_SHA | cut -c1-7)"
+            echo "already_built=false" >> $GITHUB_OUTPUT
+            echo "No image for Caddy ${VERSION}-alpine. Will build."
           fi
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Build and Push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          platforms: linux/amd64
-          tags: |
-            ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:${{ steps.version.outputs.VERSION }}
+      - name: Stop workflow if nothing to build
+        if: steps.check.outputs.already_built == 'true'
+        run: exit 0
 
+      - name: Build image
+        run: |
+          IMAGE_BASE=ghcr.io/${{ github.repository_owner }}/caddy-security
+          CADDY_VERSION=${{ steps.detect.outputs.latest_caddy }}
+
+          echo "Building image for Caddy ${CADDY_VERSION}-alpine..."
+          docker build --platform linux/amd64 \
+            -t ${IMAGE_BASE}:latest \
+            -t ${IMAGE_BASE}:${CADDY_VERSION}-alpine \
+            .
+
+      - name: Push image
+        run: |
+          IMAGE_BASE=ghcr.io/${{ github.repository_owner }}/caddy-security
+          CADDY_VERSION=${{ steps.detect.outputs.latest_caddy }}
+
+          echo "Pushing tags: latest and ${CADDY_VERSION}-alpine"
+          docker push ${IMAGE_BASE}:latest
+          docker push ${IMAGE_BASE}:${CADDY_VERSION}-alpine
