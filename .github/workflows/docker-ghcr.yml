@@ -2,12 +2,12 @@ name: Build Caddy + caddy-security (alpine)
 
 on:
   schedule:
-    - cron: "0 3 * * *"   # daily at 03:00 UTC (just checks; may skip)
-  workflow_dispatch:       # manual "Run workflow" button
+    - cron: "0 3 * * *"   # daily at 03:00 UTC (just checks)
+  workflow_dispatch:
 
 permissions:
   contents: read
-  packages: write   # needed to push to GHCR
+  packages: write
 
 jobs:
   build:
@@ -24,56 +24,78 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Detect latest Caddy version (alpine)
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Detect latest Caddy & caddy-security versions
         id: detect
         run: |
-          LATEST=$(docker run --rm caddy:alpine caddy version | head -n1 | awk '{print $1}')
-          LATEST=${LATEST#v}
-          echo "latest_caddy=$LATEST" >> $GITHUB_OUTPUT
-          echo "Detected Caddy version: $LATEST"
+          # Detect Caddy version
+          CADDY=$(docker run --rm caddy:alpine caddy version | head -n1 | awk '{print $1}')
+          CADDY=${CADDY#v}
+          echo "latest_caddy=$CADDY" >> $GITHUB_OUTPUT
+          echo "Detected Caddy version: $CADDY"
+
+          # Detect caddy-security version
+          echo 'module dummy' > go.mod
+          PLUGIN=$(go list -m -f '{{.Version}}' github.com/greenpau/caddy-security@latest)
+          PLUGIN=${PLUGIN#v}
+          echo "plugin_version=$PLUGIN" >> $GITHUB_OUTPUT
+          echo "Detected caddy-security version: $PLUGIN"
+
+          # Full combined tag
+          FULL="${CADDY}-alpine-sec-${PLUGIN}"
+          echo "full_tag=$FULL" >> $GITHUB_OUTPUT
+          echo "Combined tag: $FULL"
 
       - name: Check existing image version
         id: check
         run: |
           IMAGE_BASE=ghcr.io/${{ github.repository_owner }}/caddy-security
-          VERSION=${{ steps.detect.outputs.latest_caddy }}
+          FULL_TAG=${{ steps.detect.outputs.full_tag }}
 
-          echo "Checking if ${IMAGE_BASE}:${VERSION}-alpine already exists..."
+          echo "Checking if ${IMAGE_BASE}:${FULL_TAG} already exists..."
 
-          # Try to pull; ignore errors
-          docker pull ${IMAGE_BASE}:${VERSION}-alpine 2>/dev/null || true
+          docker pull ${IMAGE_BASE}:${FULL_TAG} 2>/dev/null || true
 
-          # If we now have it locally, it exists in registry
-          EXISTS=$(docker images -q ${IMAGE_BASE}:${VERSION}-alpine || true)
+          EXISTS=$(docker images -q ${IMAGE_BASE}:${FULL_TAG} || true)
 
           if [ -n "$EXISTS" ]; then
             echo "already_built=true" >> $GITHUB_OUTPUT
-            echo "Image for Caddy ${VERSION}-alpine already exists. Skipping build."
+            echo "Image already exists. Skipping."
           else
             echo "already_built=false" >> $GITHUB_OUTPUT
-            echo "No image for Caddy ${VERSION}-alpine. Will build."
+            echo "New build needed."
           fi
 
-      - name: Stop workflow if nothing to build
+      - name: Stop if nothing to build
         if: steps.check.outputs.already_built == 'true'
         run: exit 0
 
       - name: Build image
         run: |
           IMAGE_BASE=ghcr.io/${{ github.repository_owner }}/caddy-security
-          CADDY_VERSION=${{ steps.detect.outputs.latest_caddy }}
+          FULL_TAG=${{ steps.detect.outputs.full_tag }}
 
-          echo "Building image for Caddy ${CADDY_VERSION}-alpine..."
+          echo "Building image for:"
+          echo "  latest"
+          echo "  ${FULL_TAG}"
+
           docker build --platform linux/amd64 \
             -t ${IMAGE_BASE}:latest \
-            -t ${IMAGE_BASE}:${CADDY_VERSION}-alpine \
+            -t ${IMAGE_BASE}:${FULL_TAG} \
             .
 
       - name: Push image
         run: |
           IMAGE_BASE=ghcr.io/${{ github.repository_owner }}/caddy-security
-          CADDY_VERSION=${{ steps.detect.outputs.latest_caddy }}
+          FULL_TAG=${{ steps.detect.outputs.full_tag }}
 
-          echo "Pushing tags: latest and ${CADDY_VERSION}-alpine"
+          echo "Pushing:"
+          echo "  ${IMAGE_BASE}:latest"
+          echo "  ${IMAGE_BASE}:${FULL_TAG}"
+
           docker push ${IMAGE_BASE}:latest
-          docker push ${IMAGE_BASE}:${CADDY_VERSION}-alpine
+          docker push ${IMAGE_BASE}:${FULL_TAG}
