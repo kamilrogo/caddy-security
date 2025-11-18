@@ -33,7 +33,7 @@ jobs:
         id: detect
         run: |
           # Detect Caddy version
-          CADDY=$(docker run --rm caddy:alpine caddy version | head -n1 | awk '{print $1}')
+          CADDY=$(curl -s "https://registry.hub.docker.com/v2/repositories/library/caddy/tags?page_size=100" | jq -r '.results[].name' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+-alpine$' | sort -V | tail -1 | sed 's/-alpine$//')
           CADDY=${CADDY#v}
           echo "latest_caddy=$CADDY" >> $GITHUB_OUTPUT
           echo "Detected Caddy version: $CADDY"
@@ -70,11 +70,8 @@ jobs:
             echo "New build needed."
           fi
 
-      - name: Stop if nothing to build
-        if: steps.check.outputs.already_built == 'true'
-        run: exit 0
-
       - name: Build image
+        if: steps.check.outputs.already_built == 'false'
         run: |
           IMAGE_BASE=ghcr.io/${{ github.repository_owner }}/caddy-security
           FULL_TAG=${{ steps.detect.outputs.full_tag }}
@@ -89,6 +86,7 @@ jobs:
             .
 
       - name: Push image
+        if: steps.check.outputs.already_built == 'false'
         run: |
           IMAGE_BASE=ghcr.io/${{ github.repository_owner }}/caddy-security
           FULL_TAG=${{ steps.detect.outputs.full_tag }}
