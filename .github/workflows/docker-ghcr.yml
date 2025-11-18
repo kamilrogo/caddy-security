@@ -32,11 +32,16 @@ jobs:
           FULL="${CADDY}-alpine-sec-${PLUGIN}"
           echo "full_tag=$FULL" >> $GITHUB_OUTPUT
           echo "Combined tag: $FULL"
-
+  
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+  
       - name: Check if build needed
         id: check
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           IMAGE_BASE=ghcr.io/${{ github.repository_owner }}/caddy-security
           FULL_TAG=${{ steps.detect.outputs.full_tag }}
