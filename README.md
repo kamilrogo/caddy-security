@@ -1,13 +1,14 @@
-# Caddy + Caddy-Security (Alpine Auto-Build)
+# Caddy + caddy-security (Alpine Auto-Build)
 
 ![Build Status](https://github.com/kamilrogo/caddy-security/actions/workflows/docker-ghcr.yml/badge.svg)
 
-This repository automatically builds a **Caddy (Alpine)** Docker image with the **caddy-security** plugin.
-GitHub Actions checks daily for new versions of **Caddy** or **caddy-security** and rebuilds the image when needed.
+This project provides automated, up-to-date Docker images of [Caddy](https://caddyserver.com/) enhanced with the [caddy-security](https://github.com/greenpau/caddy-security) plugin. Images are based on Alpine Linux and are rebuilt daily using GitHub Actions to track the latest upstream releases.
 
 ---
 
-## 📦 Image
+## 📦 Image Tags
+
+Images are available via GitHub Container Registry:
 
 ```
 ghcr.io/kamilrogo/caddy-security:latest
@@ -15,14 +16,13 @@ ghcr.io/kamilrogo/caddy-security:<caddy>-alpine-sec-<plugin>
 ```
 
 Example:
-
 ```
 ghcr.io/kamilrogo/caddy-security:2.10.3-alpine-sec-1.1.22
 ```
 
 ---
 
-## 🚀 Run
+## 🚀 Quick Start
 
 ```bash
 docker run --rm \
@@ -31,18 +31,38 @@ docker run --rm \
   ghcr.io/kamilrogo/caddy-security:latest
 ```
 
+- Make sure to provide your Caddyfile.
+- For persistence (e.g. certificates), mount `/data` and `/config` as volumes.
+
 ---
 
 ## ⚙️ How It Works
 
-* Fetches current **Caddy version** from `caddy:alpine`
-* Fetches latest **caddy-security version** using Go module metadata
-* Compares against existing GHCR tags
-* Builds only when a new version is found
-* Publishes:
+- Detects latest Caddy and caddy-security plugin versions
+- Automatically rebuilds and pushes images if updates are detected
+- Publishes both `latest` and versioned tags
 
-  * `latest`
-  * `<caddy>-alpine-sec-<plugin>`
+CI is powered by [GitHub Actions](.github/workflows/docker-ghcr.yml), running daily.
 
 ---
 
+## 🛠 Technologies
+
+- Docker (Alpine base)
+- Caddy web server
+- caddy-security plugin
+- GitHub Actions (CI/CD)
+
+---
+
+## 📚 References
+
+- [Caddy web server](https://caddyserver.com/)
+- [caddy-security plugin](https://github.com/greenpau/caddy-security)
+- [Container on GHCR](https://github.com/users/kamilrogo/packages/container/package/caddy-security)
+
+---
+
+## 🤝 Contribution
+
+Currently, issues are disabled. For suggestions, contact [@kamilrogo](https://github.com/kamilrogo).
