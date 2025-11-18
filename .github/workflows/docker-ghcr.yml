@@ -2,7 +2,7 @@ name: Build Caddy + caddy-security (alpine)
 
 on:
   schedule:
-    - cron: "0 3 * * *"   # daily at 03:00 UTC (just checks)
+    - cron: "0 12 * * *"
   workflow_dispatch:
 
 permissions:
