@@ -30,7 +30,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Detect latest versions and platforms
+      - name: Detect latest versions
         id: detect
         run: |
           CADDY=$(curl -s "https://registry.hub.docker.com/v2/repositories/library/caddy/tags?page_size=100" | jq -r '.results[].name' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+-alpine$' | sort -V | tail -1 | sed 's/-alpine$//')
@@ -43,20 +43,6 @@ jobs:
           FULL="${CADDY}-alpine-sec-${PLUGIN}"
           echo "full_tag=$FULL" >> $GITHUB_OUTPUT
           echo "Combined tag: $FULL"
-      
-          # Detect Caddy platforms - properly handle variants
-          CADDY_TAG="${CADDY}-alpine"
-          echo "Detecting platforms for caddy:${CADDY_TAG}..."
-          
-          PLATFORMS=$(docker manifest inspect caddy:${CADDY_TAG} | \
-            jq -r '.manifests[] | select(.platform.os != null and .platform.architecture != null) | 
-              if .platform.variant then "\(.platform.os)/\(.platform.architecture)/\(.platform.variant)" 
-              else "\(.platform.os)/\(.platform.architecture)" end' | \
-            sort -u | \
-            paste -sd "," -)
-          
-          echo "platforms=$PLATFORMS" >> $GITHUB_OUTPUT
-          echo "Detected platforms: $PLATFORMS"
 
       - name: Check existing image
         id: check
@@ -77,7 +63,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          platforms: ${{ steps.detect.outputs.platforms }}
+          platforms: linux/amd64,linux/arm/v6,linux/arm/v7,linux/arm64/v8
           push: true
           tags: |
             ghcr.io/${{ github.repository_owner }}/caddy-security:latest
