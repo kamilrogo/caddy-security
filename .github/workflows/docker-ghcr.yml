@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 jobs:
@@ -97,3 +97,16 @@ jobs:
 
           docker push ${IMAGE_BASE}:latest
           docker push ${IMAGE_BASE}:${FULL_TAG}
+
+      - name: Create Release
+        if: steps.check.outputs.already_built == 'false'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.detect.outputs.full_tag }}
+          name: "Release ${{ steps.detect.outputs.full_tag }}"
+          body: |
+            ## Caddy v${{ steps.detect.outputs.latest_caddy }} with caddy-security v${{ steps.detect.outputs.plugin_version }}
+
+            See the [project README](https://github.com/${{ github.repository }}/blob/main/README.md) for usage instructions.
+          draft: false
+          prerelease: false
