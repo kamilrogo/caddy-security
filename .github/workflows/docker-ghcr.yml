@@ -44,12 +44,13 @@ jobs:
           echo "full_tag=$FULL" >> $GITHUB_OUTPUT
           echo "Combined tag: $FULL"
       
-          # Detect Caddy platforms
+          # Detect Caddy platforms (filter out variants with /v6, /v7 suffixes)
           CADDY_TAG="${CADDY}-alpine"
           echo "Detecting platforms for caddy:${CADDY_TAG}..."
           
           PLATFORMS=$(docker manifest inspect caddy:${CADDY_TAG} | \
-            jq -r '.manifests[] | .platform | "\(.os)/\(.architecture)"' | \
+            jq -r '.manifests[] | select(.platform.architecture != null and .platform.os != null) | "\(.platform.os)/\(.platform.architecture)"' | \
+            sort -u | \
             paste -sd "," -)
           
           echo "platforms=$PLATFORMS" >> $GITHUB_OUTPUT
