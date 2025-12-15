@@ -22,7 +22,8 @@ jobs:
       - name: Detect latest versions
         id: detect
         run: |
-          CADDY=$(curl -s "https://registry.hub.docker.com/v2/repositories/library/caddy/tags?page_size=100&name=-alpine" | jq -r '.results[].name' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+-alpine$' | sort -V | tail -1 | sed 's/-alpine$//')
+          CADDY=$(curl -s "https://registry.hub.docker.com/v2/repositories/library/caddy/tags?page_size=100&name=alpine" | jq -r '.results[].name' | gre
+p -E '^([0-9]+)?(\.[0-9]+)?(\.[0-9]+-)?alpine$' | sed '1,/^alpine$/d' | head -1 | sed 's/-alpine$//')
           CADDY=${CADDY#v}
           echo "latest_caddy=$CADDY" >> $GITHUB_OUTPUT
           
