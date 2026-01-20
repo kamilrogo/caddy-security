@@ -22,8 +22,8 @@ jobs:
       - name: Detect latest versions
         id: detect
         run: |
-          CADDY=$(curl -s "https://registry.hub.docker.com/v2/repositories/library/caddy/tags?page_size=100&name=alpine" | jq -r '.results[].name' | grep -E '^([0-9]+)?(\.[0-9]+)?(\.[0-9]+-)?alpine$' | sed '0,/^alpine$/d' | head -1 | sed 's/-alpine$//')
-          CADDY=${CADDY#v}
+          ALPINE_DIGEST=$(curl -s https://registry.hub.docker.com/v2/repositories/library/caddy/tags/alpine | jq -r '.images[0].digest')
+          CADDY=$(curl -s https://registry.hub.docker.com/v2/repositories/library/caddy/tags?page_size=100 | jq -r --arg D "$ALPINE_DIGEST" '[.results[]|select(.name|test("^[0-9]+(\\.[0-9]+){1,2}-alpine$"))|select(.images[].digest==$D)|.name|sub("-alpine$";"")|. as $v|($v|split(".")) as $p|{v:$v,a:($p[0]|tonumber),b:($p[1]|tonumber),c:(($p[2]//"0")|tonumber)}]|sort_by(.a,.b,.c)|last.v')
           echo "latest_caddy=$CADDY" >> $GITHUB_OUTPUT
           
           PLUGIN=$(curl -s "https://api.github.com/repos/greenpau/caddy-security/releases/latest" | jq -r '.tag_name' | sed 's/^v//')
@@ -81,6 +81,8 @@ jobs:
         timeout-minutes: 30
         with:
           context: .
+          build-args: |
+            CADDY_VERSION=${{ needs.check-versions.outputs.caddy_version }}
           platforms: linux/amd64,linux/arm64
           push: true
           provenance: false
