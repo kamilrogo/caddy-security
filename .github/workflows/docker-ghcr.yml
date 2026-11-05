@@ -2,56 +2,121 @@ name: Caddy + Security Plugin Builder
 
 on:
   schedule:
-    - cron: "0 12 * * *"  # Daily at 12:00 UTC
+    - cron: "0 12 * * *" # Daily at 12:00 UTC
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Force rebuild even if nothing changed"
+        type: boolean
+        default: false
 
 permissions:
-  contents: write
-  packages: write
+  contents: read
+
+concurrency:
+  group: docker-ghcr
+  cancel-in-progress: false
+
+env:
+  ANNOTATION_KEY: io.github.kamilrogo.base-digests
 
 jobs:
   check-versions:
     name: Check for new versions
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
     outputs:
-      caddy_version: ${{ steps.detect.outputs.latest_caddy }}
+      caddy_version: ${{ steps.detect.outputs.caddy_version }}
       plugin_version: ${{ steps.detect.outputs.plugin_version }}
       full_tag: ${{ steps.detect.outputs.full_tag }}
+      base_digests: ${{ steps.check.outputs.base_digests }}
       should_build: ${{ steps.check.outputs.should_build }}
     steps:
       - name: Detect latest versions
         id: detect
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          ALPINE_DIGEST=$(curl -s https://registry.hub.docker.com/v2/repositories/library/caddy/tags/alpine | jq -r '.images[0].digest')
-          CADDY=$(curl -s https://registry.hub.docker.com/v2/repositories/library/caddy/tags?page_size=100 | jq -r --arg D "$ALPINE_DIGEST" '[.results[]|select(.name|test("^[0-9]+(\\.[0-9]+){1,2}-alpine$"))|select(.images[].digest==$D)|.name|sub("-alpine$";"")|. as $v|($v|split(".")) as $p|{v:$v,a:($p[0]|tonumber),b:($p[1]|tonumber),c:(($p[2]//"0")|tonumber)}]|sort_by(.a,.b,.c)|last.v')
-          echo "latest_caddy=$CADDY" >> $GITHUB_OUTPUT
-          
-          PLUGIN=$(curl -s "https://api.github.com/repos/greenpau/caddy-security/releases/latest" | jq -r '.tag_name' | sed 's/^v//')
-          echo "plugin_version=$PLUGIN" >> $GITHUB_OUTPUT
-          
+          set -euo pipefail
+          api() { curl -fsSL --retry 3 --retry-delay 2 "$@"; }
+
+          # Latest Caddy version that the official "alpine" tag points to
+          ALPINE_DIGEST=$(api "https://registry.hub.docker.com/v2/repositories/library/caddy/tags/alpine" \
+            | jq -r '.images[0].digest')
+          CADDY=$(api "https://registry.hub.docker.com/v2/repositories/library/caddy/tags?page_size=100" \
+            | jq -r --arg D "$ALPINE_DIGEST" '
+                [.results[]
+                 | select(.name | test("^[0-9]+\\.[0-9]+(\\.[0-9]+)?-alpine$"))
+                 | select(any(.images[]?; .digest == $D))
+                 | .name | sub("-alpine$"; "")]
+                | sort_by(split(".") | map(tonumber))
+                | last')
+
+          # Latest caddy-security release
+          PLUGIN=$(api -H "Authorization: Bearer ${GH_TOKEN}" \
+                       -H "Accept: application/vnd.github+json" \
+                       "https://api.github.com/repos/greenpau/caddy-security/releases/latest" \
+            | jq -r '.tag_name' | sed 's/^v//')
+
+          [[ "$CADDY"  =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || { echo "::error::Invalid Caddy version: '$CADDY'"; exit 1; }
+          [[ "$PLUGIN" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]    || { echo "::error::Invalid plugin version: '$PLUGIN'"; exit 1; }
+
           FULL="${CADDY}-alpine-sec-${PLUGIN}"
-          echo "full_tag=$FULL" >> $GITHUB_OUTPUT
+          {
+            echo "caddy_version=$CADDY"
+            echo "plugin_version=$PLUGIN"
+            echo "full_tag=$FULL"
+          } >> "$GITHUB_OUTPUT"
           echo "Combined tag: $FULL"
-  
+
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-  
+
       - name: Check if build needed
         id: check
+        env:
+          CADDY: ${{ steps.detect.outputs.caddy_version }}
+          FULL_TAG: ${{ steps.detect.outputs.full_tag }}
+          FORCE: ${{ inputs.force }}
         run: |
-          IMAGE_BASE=ghcr.io/${{ github.repository_owner }}/caddy-security
-          FULL_TAG=${{ steps.detect.outputs.full_tag }}
-          
-          if docker manifest inspect ${IMAGE_BASE}:${FULL_TAG} > /dev/null 2>&1; then
-            echo "should_build=false" >> $GITHUB_OUTPUT
-            echo "Image exists. Skipping build."
+          set -euo pipefail
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/caddy-security"
+
+          # Digests of the upstream base images this build would use
+          RUNTIME=$(docker buildx imagetools inspect "caddy:${CADDY}-alpine" --format '{{.Manifest.Digest}}')
+          BUILDER=$(docker buildx imagetools inspect "caddy:${CADDY}-builder-alpine" --format '{{.Manifest.Digest}}')
+          DIGESTS="runtime=${RUNTIME},builder=${BUILDER}"
+          echo "base_digests=$DIGESTS" >> "$GITHUB_OUTPUT"
+
+          if [ "${FORCE:-false}" = "true" ]; then
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            echo "Forced build."
+            exit 0
+          fi
+
+          if ! docker buildx imagetools inspect "${IMAGE}:${FULL_TAG}" >/dev/null 2>&1; then
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            echo "New version (${FULL_TAG}) - build needed."
+            exit 0
+          fi
+
+          OLD=$(docker buildx imagetools inspect --raw "${IMAGE}:${FULL_TAG}" \
+                | jq -r --arg K "$ANNOTATION_KEY" '.annotations[$K] // ""')
+          if [ "$OLD" = "$DIGESTS" ]; then
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+            echo "Image exists and base images unchanged. Skipping build."
           else
-            echo "should_build=true" >> $GITHUB_OUTPUT
-            echo "New build needed."
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            echo "Base images changed (or annotation missing) - rebuilding."
+            echo "old: ${OLD:-<none>}"
+            echo "new: $DIGESTS"
           fi
 
   build-and-push:
@@ -59,9 +124,13 @@ jobs:
     needs: check-versions
     if: needs.check-versions.outputs.should_build == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -77,19 +146,28 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        timeout-minutes: 30
+        uses: docker/build-push-action@v6
         with:
           context: .
           build-args: |
             CADDY_VERSION=${{ needs.check-versions.outputs.caddy_version }}
+            PLUGIN_VERSION=${{ needs.check-versions.outputs.plugin_version }}
           platforms: linux/amd64,linux/arm64
           push: true
+          # Set both to true if you want attestations (adds extra manifests to the index)
           provenance: false
           sbom: false
           tags: |
             ghcr.io/${{ github.repository_owner }}/caddy-security:latest
             ghcr.io/${{ github.repository_owner }}/caddy-security:${{ needs.check-versions.outputs.full_tag }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.title=caddy-security
+            org.opencontainers.image.description=Caddy with the caddy-security plugin (Alpine)
+            org.opencontainers.image.version=${{ needs.check-versions.outputs.full_tag }}
+          annotations: |
+            index:org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            index:${{ env.ANNOTATION_KEY }}=${{ needs.check-versions.outputs.base_digests }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -97,22 +175,76 @@ jobs:
     name: Create GitHub release
     needs: [check-versions, build-and-push]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      CADDY: ${{ needs.check-versions.outputs.caddy_version }}
+      PLUGIN: ${{ needs.check-versions.outputs.plugin_version }}
+      TAG: ${{ needs.check-versions.outputs.full_tag }}
     steps:
-      - name: Create release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ needs.check-versions.outputs.full_tag }}
-          name: "Caddy ${{ needs.check-versions.outputs.caddy_version }} + Security ${{ needs.check-versions.outputs.plugin_version }}"
-          body: |
-            ## 🔐 Caddy v${{ needs.check-versions.outputs.caddy_version }} with caddy-security v${{ needs.check-versions.outputs.plugin_version }}
-            
-            **Supported Platforms:** `linux/amd64`, `linux/arm64`
-            
-            ### Usage
-            ```bash
-            docker pull ghcr.io/${{ github.repository_owner }}/caddy-security:${{ needs.check-versions.outputs.full_tag }}
-            ```
-            
-            See the [README](https://github.com/${{ github.repository }}) for configuration details.
-          draft: false
-          prerelease: false
+      - name: Create release with upstream changelogs
+        run: |
+          set -euo pipefail
+
+          # Rebuild of the same version (base image refresh) -> no new release
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists. Skipping."
+            exit 0
+          fi
+
+          PREV=$(gh release list --limit 1 --json tagName -q '.[0].tagName // ""')
+          PREV_CADDY=""; PREV_PLUGIN=""
+          if [[ "$PREV" == *-alpine-sec-* ]]; then
+            PREV_CADDY=${PREV%%-alpine-sec-*}
+            PREV_PLUGIN=${PREV##*-alpine-sec-}
+          fi
+
+          # notes <repo> <prev> <new> -> release notes of versions in (prev, new]
+          notes() {
+            local repo=$1 prev=$2 new=$3
+            gh api "repos/${repo}/releases" --paginate \
+              -q '.[] | select(.prerelease==false and .draft==false) | {t:.tag_name, b:(.body // "")}' \
+            | jq -c . | while read -r r; do
+                t=$(jq -r .t <<<"$r"); v=${t#v}
+                # skip v <= prev
+                if [ -n "$prev" ] && [ "$(printf '%s\n%s\n' "$prev" "$v" | sort -V | tail -1)" = "$prev" ]; then continue; fi
+                # skip v > new
+                if [ "$(printf '%s\n%s\n' "$v" "$new" | sort -V | tail -1)" != "$new" ]; then continue; fi
+                echo "#### $t"
+                jq -r .b <<<"$r" | sed -n '1,40p'
+                echo
+              done
+          }
+
+          CADDY_NOTES=$(notes caddyserver/caddy "$PREV_CADDY" "$CADDY" | sed -n '1,200p')
+          PLUGIN_NOTES=$(notes greenpau/caddy-security "$PREV_PLUGIN" "$PLUGIN" | sed -n '1,200p')
+          SEC=$(printf '%s\n%s\n' "$CADDY_NOTES" "$PLUGIN_NOTES" \
+                | grep -iE 'CVE-[0-9]{4}|GHSA-|vulnerab|security (fix|advisor|patch|update)' || true)
+
+          {
+            echo "## 🔐 Caddy v${CADDY} + caddy-security v${PLUGIN}"
+            echo
+            echo '```bash'
+            echo "docker pull ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/caddy-security:${TAG}"
+            echo '```'
+            echo
+            echo "**Supported platforms:** \`linux/amd64\`, \`linux/arm64\`"
+            if [ -n "$SEC" ]; then
+              echo
+              echo "### ⚠️ Security-related"
+              echo "$SEC"
+            fi
+            echo
+            echo "### Caddy"
+            if [ -n "$CADDY_NOTES" ]; then echo "$CADDY_NOTES"; else echo "_No upstream release notes found._"; fi
+            [ -n "$PREV_CADDY" ] && echo "[Full diff](https://github.com/caddyserver/caddy/compare/v${PREV_CADDY}...v${CADDY})"
+            echo
+            echo "### caddy-security"
+            if [ -n "$PLUGIN_NOTES" ]; then echo "$PLUGIN_NOTES"; else echo "_No upstream release notes found._"; fi
+            [ -n "$PREV_PLUGIN" ] && echo "[Full diff](https://github.com/greenpau/caddy-security/compare/v${PREV_PLUGIN}...v${PLUGIN})"
+          } > notes.md
+
+          gh release create "$TAG" --title "Caddy ${CADDY} + Security ${PLUGIN}" --notes-file notes.md

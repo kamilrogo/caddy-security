@@ -1,10 +1,11 @@
 ARG CADDY_VERSION
+ARG PLUGIN_VERSION
 
-# Build Caddy with caddy-security using the official ALPINE builder image
+# Build Caddy with a pinned caddy-security using the official ALPINE builder image
 FROM caddy:${CADDY_VERSION}-builder-alpine AS builder
-
+ARG PLUGIN_VERSION
 RUN xcaddy build \
-    --with github.com/greenpau/caddy-security@latest
+    --with github.com/greenpau/caddy-security@v${PLUGIN_VERSION}
 
 # Final runtime image (ALPINE)
 FROM caddy:${CADDY_VERSION}-alpine
