@@ -214,15 +214,20 @@ jobs:
                 # skip v > new
                 if [ "$(printf '%s\n%s\n' "$v" "$new" | sort -V | tail -1)" != "$new" ]; then continue; fi
                 echo "#### $t"
-                jq -r .b <<<"$r" | sed -n '1,40p'
+                body=$(jq -r .b <<<"$r")
+                printf '%s\n' "$body" | sed -n '1,60p'
+                if [ "$(printf '%s\n' "$body" | wc -l)" -gt 60 ]; then
+                  echo
+                  echo "_...truncated, [full release notes](https://github.com/${repo}/releases/tag/${t})_"
+                fi
                 echo
               done
           }
 
-          CADDY_NOTES=$(notes caddyserver/caddy "$PREV_CADDY" "$CADDY" | sed -n '1,200p')
-          PLUGIN_NOTES=$(notes greenpau/caddy-security "$PREV_PLUGIN" "$PLUGIN" | sed -n '1,200p')
+          CADDY_NOTES=$(notes caddyserver/caddy "$PREV_CADDY" "$CADDY" | sed -n '1,300p')
+          PLUGIN_NOTES=$(notes greenpau/caddy-security "$PREV_PLUGIN" "$PLUGIN" | sed -n '1,300p')
           SEC=$(printf '%s\n%s\n' "$CADDY_NOTES" "$PLUGIN_NOTES" \
-                | grep -iE 'CVE-[0-9]{4}|GHSA-|vulnerab|security (fix|advisor|patch|update)' || true)
+                | grep -iE 'CVE-[0-9]{4}|GHSA-|vulnerab|security (fix|advisor|patch|update|hardening)' || true)
 
           {
             echo "## 🔐 Caddy v${CADDY} + caddy-security v${PLUGIN}"
@@ -239,12 +244,20 @@ jobs:
             fi
             echo
             echo "### Caddy"
-            if [ -n "$CADDY_NOTES" ]; then echo "$CADDY_NOTES"; else echo "_No upstream release notes found._"; fi
-            [ -n "$PREV_CADDY" ] && echo "[Full diff](https://github.com/caddyserver/caddy/compare/v${PREV_CADDY}...v${CADDY})"
+            if [ "$PREV_CADDY" = "$CADDY" ]; then echo "_No change (v${CADDY})._"
+            elif [ -n "$CADDY_NOTES" ]; then echo "$CADDY_NOTES"
+            else echo "_No upstream release notes found._"; fi
+            if [ -n "$PREV_CADDY" ] && [ "$PREV_CADDY" != "$CADDY" ]; then
+              echo "[Full diff](https://github.com/caddyserver/caddy/compare/v${PREV_CADDY}...v${CADDY})"
+            fi
             echo
             echo "### caddy-security"
-            if [ -n "$PLUGIN_NOTES" ]; then echo "$PLUGIN_NOTES"; else echo "_No upstream release notes found._"; fi
-            [ -n "$PREV_PLUGIN" ] && echo "[Full diff](https://github.com/greenpau/caddy-security/compare/v${PREV_PLUGIN}...v${PLUGIN})"
+            if [ "$PREV_PLUGIN" = "$PLUGIN" ]; then echo "_No change (v${PLUGIN})._"
+            elif [ -n "$PLUGIN_NOTES" ]; then echo "$PLUGIN_NOTES"
+            else echo "_No upstream release notes found._"; fi
+            if [ -n "$PREV_PLUGIN" ] && [ "$PREV_PLUGIN" != "$PLUGIN" ]; then
+              echo "[Full diff](https://github.com/greenpau/caddy-security/compare/v${PREV_PLUGIN}...v${PLUGIN})"
+            fi
           } > notes.md
 
           gh release create "$TAG" --title "Caddy ${CADDY} + Security ${PLUGIN}" --notes-file notes.md

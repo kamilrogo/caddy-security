@@ -1,4 +1,4 @@
-ARG CADDY_VERSION
+ARG CADDY_VERSION=2
 ARG PLUGIN_VERSION
 
 # Build Caddy with a pinned caddy-security using the official ALPINE builder image
